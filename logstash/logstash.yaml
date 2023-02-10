@@ -109,17 +109,6 @@ data:
       }
     }
 
-    # filter {
-    #   if [@metadata][input-http] {
-    #     date {
-    #       match => [ "date", "UNIX" ]
-    #       remove_field => [ "date" ]
-    #     }
-    #     mutate {
-    #       remove_field => ["headers","host"]
-    #     }
-    #   }
-    # }
 
     output {
       elasticsearch {
