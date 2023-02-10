@@ -1,0 +1,132 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  labels:
+    app.kubernetes.io/name: elasticsearch-logstash
+    app.kubernetes.io/component: logstash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: elasticsearch-logstash
+      app.kubernetes.io/component: logstash
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: elasticsearch-logstash
+        app.kubernetes.io/component: logstash
+    spec:
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.3.0
+          ports:
+            - name: "http-fluentbit"
+              containerPort: 5555
+          env:
+            - name: ES_HOSTS
+              value: "https://quickstart-es-http:9200"
+            - name: ES_USER
+              value: "elastic"
+            - name: ES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: quickstart-es-elastic-user
+                  key: elastic
+          volumeMounts:
+            - name: config-volume
+              mountPath: /usr/share/logstash/config
+            - name: pipeline-volume
+              mountPath: /usr/share/logstash/pipeline
+            - name: ca-certs
+              mountPath: /etc/logstash/certificates
+              readOnly: true
+      volumes:
+        - name: config-volume
+          configMap:
+            name: logstash-config
+        - name: pipeline-volume
+          configMap:
+            name: logstash-pipeline
+        - name: ca-certs
+          secret:
+            secretName: quickstart-es-http-certs-public
+ 
+---
+ 
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  labels:
+    app.kubernetes.io/name: elasticsearch-logstash
+    app.kubernetes.io/component: logstash
+spec:
+  ports:
+    - name: "http-fluentbit"
+      port: 5555
+      targetPort: 5555
+  selector:
+    app.kubernetes.io/name: elasticsearch-logstash
+    app.kubernetes.io/component: logstash
+
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  labels:
+    app.kubernetes.io/name: elasticsearch-logstash
+    app.kubernetes.io/component: logstash
+data:
+  logstash.yml: |
+    http.host: 0.0.0.0
+    pipeline.ecs_compatibility: disabled
+  pipelines.yml: |
+    - pipeline.id: logstash
+      path.config: "/usr/share/logstash/pipeline/logstash.conf"
+ 
+  log4j2.properties: |
+    logger.logstashpipeline.name = logstash.inputs.beats
+    logger.logstashpipeline.level = error
+ 
+---
+
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-pipeline
+  labels:
+    app.kubernetes.io/name: elasticsearch-logstash
+    app.kubernetes.io/component: logstash
+data:
+  logstash.conf: |
+    input {
+      http {
+        port => 5555
+        # add_field => { "[@metadata][input-http]" => "" }
+      }
+    }
+
+    # filter {
+    #   if [@metadata][input-http] {
+    #     date {
+    #       match => [ "date", "UNIX" ]
+    #       remove_field => [ "date" ]
+    #     }
+    #     mutate {
+    #       remove_field => ["headers","host"]
+    #     }
+    #   }
+    # }
+
+    output {
+      elasticsearch {
+        hosts => [ "${ES_HOSTS}" ]
+        user => "${ES_USER}"
+        password => "${ES_PASSWORD}"
+        cacert => '/etc/logstash/certificates/ca.crt'
+        index => "fluentbit-%{+YYYY.MM.dd}"
+      }
+    }
